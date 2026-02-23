@@ -35,7 +35,7 @@ STATE_FILE = None
 
 def get_state_file():
     """Get state file path based on main currency"""
-    return f"/home/ubuntu/workspace/state_{MAIN_CURRENCY}.json"
+    return f"/home/ubuntu/workspace/crypto_trading_bot/state_{MAIN_CURRENCY}.json"
 
 def load_state():
     state_file = get_state_file()
