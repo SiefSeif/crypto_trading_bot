@@ -17,35 +17,33 @@ app = Flask(__name__)
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv('API_SECRET')
 SECRET_TOKEN = os.getenv('SECRET_TOKEN')
-STATE_FILE = "/home/ubuntu/workspace/state.json"
 MINIMUM_ACT_PRICE = 0
 
 client = RESTClient(api_key=API_KEY, api_secret=API_SECRET)
 
 # Configuration
-BTC_TRADE_AMOUNT = '0.001'  # Default 0.0001 BTC
-SIDE = 'SELL' # Default SIDE
-FEES_ESTIMATE = 0.006 # 0.6% pessemistic Limit orders are 0.4% (maker), but could become 0.6% (taker) if they fill immediately.
-SLIPPAGE_ESTIMATE = 10 # 0.002 # 0.2%  estimated slippage multiply in GBP
-MIN_PROFIT = 0 # 20
-CHECK_PREV_BUY = False # Separate each short/long from previous 
+MAIN_CURRENCY = 'BTC'  # Default currency
+BTC_TRADE_AMOUNT = '0.001'  # Default trade amount
+SIDE = 'SELL'  # Default SIDE
+FEES_ESTIMATE = 0.006  # 0.6% pessimistic estimate
+SLIPPAGE_ESTIMATE = 10
+MIN_PROFIT = 0
+CHECK_PREV_BUY = False
 
-# Trading state
-# trading_state = {
-#     'position': None,  # None, 'waiting_sell', 'waiting_buy'
-#     'last_sell_price': None,
-#     'last_buy_price': None,
-#     'last_sell_gain': 0.0,
-#     'last_buy_pay': 0.0,
-#     'total_profit': 0.0,
-# }
+# State file will be set after MAIN_CURRENCY is determined
+STATE_FILE = None
+
+def get_state_file():
+    """Get state file path based on main currency"""
+    return f"/home/ubuntu/workspace/state_{MAIN_CURRENCY}.json"
 
 def load_state():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
+    state_file = get_state_file()
+    if os.path.exists(state_file):
+        with open(state_file, "r") as f:
             content = f.read()
             if content:
-                return json.loads(content)  # ← Return loaded state
+                return json.loads(content)
     
     # Return default if file doesn't exist
     return {
@@ -58,17 +56,18 @@ def load_state():
     }
 
 def save_state(trading_state):
-    with open(STATE_FILE, "w") as f:
+    state_file = get_state_file()
+    with open(state_file, "w") as f:
         json.dump(trading_state, f)
 
 # Trading Logic
 def execute_first_order(signal_data):
-    """Execute SELL order"""
+    """Execute SELL or BUY order"""
     
     price = signal_data.get('price')
-    ticker = signal_data.get('ticker', 'BTCGBP')
+    ticker = signal_data.get('ticker', f'{MAIN_CURRENCY}GBP')
     # Convert ticker to Coinbase format (BTCGBP -> BTC-GBP)
-    product_id = f"{ticker[:-3]}-{ticker[-3:]}" if 'GBP' in ticker else 'BTC-GBP'
+    product_id = f"{ticker[:-3]}-{ticker[-3:]}" if 'GBP' in ticker else f"{MAIN_CURRENCY}-GBP"
     
     global SIDE
 
@@ -129,7 +128,7 @@ def execute_first_order(signal_data):
                         print(f"💸 Fees: ${fees}")
                         print(f"💵 Before Fees: ${gain_before_fees}")
                         print(f"💵 After  Fees: ${gain_after_fees}")
-                        print(f"📊 Amount: {BTC_TRADE_AMOUNT} BTC")
+                        print(f"📊 Amount: {BTC_TRADE_AMOUNT} {MAIN_CURRENCY}")
                         print(f"📈 Waiting for BUY signal acheives pay below ${gain_after_fees} gain")
                         print(f"{'='*60}\n")
 
@@ -143,7 +142,7 @@ def execute_first_order(signal_data):
                         print(f"💸 Fees: ${fees}")
                         print(f"💵 Before Fees: ${pay_before_fees}")
                         print(f"💵 After  Fees: ${pay_after_fees}")
-                        print(f"📊 Amount: {BTC_TRADE_AMOUNT} BTC")
+                        print(f"📊 Amount: {BTC_TRADE_AMOUNT} {MAIN_CURRENCY}")
                         print(f"📈 Waiting for SELL signal acheives above ${pay_after_fees} pay")
                         print(f"{'='*60}\n")
                     
@@ -170,7 +169,8 @@ def execute_first_order(signal_data):
 def execute_buy_order(signal_data):
     """Execute BUY order only if profitable"""
     price = signal_data.get('price')
-    ticker = signal_data.get('ticker', 'BTCGBP')
+    ticker = signal_data.get('ticker', f"{MAIN_CURRENCY}GBP")
+    product_id = f"{ticker[:-3]}-{ticker[-3:]}" if 'GBP' in ticker else f"{MAIN_CURRENCY}-GBP"
     trading_state = load_state()
     last_sell_gain = trading_state['last_sell_gain']
     
@@ -185,15 +185,12 @@ def execute_buy_order(signal_data):
         print(f"   Last SELL gain: ${last_sell_gain}")
         return False
     
-    product_id = f"{ticker[:-3]}-{ticker[-3:]}" if 'GBP' in ticker else 'BTC-GBP'
-    
     print(f"\n{'='*60}")
     print(f"🟢 EXECUTING BUY ORDER")
     print(f"{'='*60}")
     
     try:
         # Place BUY order on Coinbase
-        # order = client.market_order_buy(client_order_id=str(uuid.uuid4()), product_id=product_id, base_size=BTC_TRADE_AMOUNT)
         order_response = client.limit_order_gtc_buy(client_order_id=str(uuid.uuid4()), product_id=product_id,\
                                             base_size=BTC_TRADE_AMOUNT, limit_price=str(round(price * 1.001, 2)))
 
@@ -225,7 +222,7 @@ def execute_buy_order(signal_data):
                     print(f"💸 Fees: ${fees}")
                     print(f"💵 Before Fees: ${pay_before_fees}")
                     print(f"💵 After  Fees: ${pay_after_fees}")
-                    print(f"📊 Amount: {BTC_TRADE_AMOUNT} BTC")
+                    print(f"📊 Amount: {BTC_TRADE_AMOUNT} {MAIN_CURRENCY}")
                     print(f"💵 Trade Profit: ${profit:.2f}")
                     print(f"💰 Total Profit: ${trading_state['total_profit']:.2f}")
                     print(f"📈 Waiting for SELL signal above ${pay_after_fees} pay")
@@ -258,8 +255,8 @@ def execute_sell_order(signal_data):
     if MINIMUM_ACT_PRICE != 0 and price < MINIMUM_ACT_PRICE:
         print(f"⚠️ Current price ${price} is below minimum activation price ${MINIMUM_ACT_PRICE}. Skipping SELL order.")
         return False
-        
-    ticker = signal_data.get('ticker', 'BTCGBP')
+    ticker = signal_data.get('ticker', f"{MAIN_CURRENCY}GBP")
+    product_id = f"{ticker[:-3]}-{ticker[-3:]}" if 'GBP' in ticker else f"{MAIN_CURRENCY}-GBP"
     trading_state = load_state()
     last_buy_pay = trading_state['last_buy_pay']
     
@@ -274,15 +271,12 @@ def execute_sell_order(signal_data):
         print(f"   Last BUY pay: ${last_buy_pay}")
         return False
     
-    product_id = f"{ticker[:-3]}-{ticker[-3:]}" if 'GBP' in ticker else 'BTC-GBP'
-    
     print(f"\n{'='*60}")
     print(f"🔴 EXECUTING SELL ORDER")
     print(f"{'='*60}")
     
     try:
         # Place SELL order on Coinbase
-        # order = client.market_order_sell(client_order_id=str(uuid.uuid4()), product_id=product_id, base_size=BTC_TRADE_AMOUNT) # Returns CreateOrderResponse
         order_response = client.limit_order_gtc_sell(client_order_id=str(uuid.uuid4()), product_id=product_id,\
                                             base_size=BTC_TRADE_AMOUNT, limit_price=str(round(price * 0.999, 2)))
 
@@ -316,7 +310,7 @@ def execute_sell_order(signal_data):
                     print(f"💸 Fees: ${fees}")
                     print(f"💵 Before Fees: ${gain_before_fees}")
                     print(f"💵 After  Fees: ${gain_after_fees}")
-                    print(f"📊 Amount: {BTC_TRADE_AMOUNT} BTC")
+                    print(f"📊 Amount: {BTC_TRADE_AMOUNT} {MAIN_CURRENCY}")
                     print(f"💵 Trade Profit: ${profit:.2f}")
                     print(f"💰 Total Profit: ${trading_state['total_profit']:.2f}")
                     print(f"📈 Waiting for BUY signal below ${gain_after_fees} gain")
@@ -404,20 +398,24 @@ if __name__ == '__main__':
     PORT = int(os.environ.get('PORT'))
     
     if len(sys.argv) > 1:
-        BTC_TRADE_AMOUNT = str(sys.argv[1])
-    if len(sys.argv) > 2 and sys.argv[2] in ['BUY', 'SELL']:
-        SIDE = sys.argv[2]
-    if len(sys.argv) > 3:
-        MINIMUM_ACT_PRICE = int(sys.argv[3])
+        MAIN_CURRENCY = str(sys.argv[1]).upper()
+    if len(sys.argv) > 2:
+        BTC_TRADE_AMOUNT = str(sys.argv[2])
+    if len(sys.argv) > 3 and sys.argv[3] in ['BUY', 'SELL']:
+        SIDE = sys.argv[3]
+    if len(sys.argv) > 4:
+        MINIMUM_ACT_PRICE = int(sys.argv[4])
 
     print(f"\n{'='*60}")
     print(f"🤖 COINBASE TRADING BOT STARTING")
     print(f"{'='*60}")
     print(f"🔒 Server port: {PORT}")
     print(f"📡 Webhook: http://0.0.0.0:{PORT}/webhook")
-    print(f"₿  BTC Amount per trade: {BTC_TRADE_AMOUNT}")
+    print(f"💱 Trading pair: {MAIN_CURRENCY}-GBP")
+    print(f"📊 Amount per trade: {BTC_TRADE_AMOUNT} {MAIN_CURRENCY}")
     print(f"Act Minimum: {MINIMUM_ACT_PRICE}")
     print(f"⏳ Strategy: Waiting for first ${SIDE} signal...")
+    print(f"📁 State file: {get_state_file()}")
     print(f"{'='*60}\n")
     
     app.run(host='0.0.0.0', port=PORT, debug=False)
