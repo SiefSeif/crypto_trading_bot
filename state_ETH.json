@@ -1,0 +1,18 @@
+{
+    "BTCGBP": {
+        "position": "waiting_buy",
+        "last_sell_price": null,
+        "last_buy_price": null,
+        "last_sell_gain": 2493.25,
+        "last_buy_pay": 2514.84,
+        "total_profit": -0.29000000000041837
+    },
+    "ETHGBP": {
+        "position": "waiting_buy",
+        "last_sell_price": null,
+        "last_buy_price": null,
+        "last_sell_gain": 2493.25,
+        "last_buy_pay": 2514.84,
+        "total_profit": -0.29000000000041837
+    }
+}
