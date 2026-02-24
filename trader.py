@@ -396,16 +396,17 @@ def webhook():
 
 if __name__ == '__main__':
     PORT = int(os.environ.get('PORT'))
-    
+
     # Load amounts configuration
     amounts_file = "/home/ubuntu/workspace/crypto_trading_bot/amounts.json"
+
     if os.path.exists(amounts_file):
         with open(amounts_file, "r") as f:
             AMOUNTS = json.load(f)
             print(f"✅ Loaded amounts from {amounts_file}")
     else:
         print(f"⚠️ amounts.json not found at {amounts_file}")
-        return 
+        sys.exit(1) 
     
     if len(sys.argv) > 1 and sys.argv[1] in ['BUY', 'SELL']:
         SIDE = sys.argv[1]
@@ -417,7 +418,6 @@ if __name__ == '__main__':
     print(f"{'='*60}")
     print(f"🔒 Server port: {PORT}")
     print(f"📡 Webhook: http://0.0.0.0:{PORT}/webhook")
-    print(f"💱 Trading pair: XXX-GBP")
     print(f"📋 Amounts : {AMOUNTS}")
     print(f"Act Minimum: {MINIMUM_ACT_PRICE}")
     print(f"⏳ Strategy: Waiting for first ${SIDE} signal...")
