@@ -22,23 +22,22 @@ MINIMUM_ACT_PRICE = 0
 client = RESTClient(api_key=API_KEY, api_secret=API_SECRET)
 
 # Configuration
-MAIN_CURRENCY = 'BTC'  # Default currency
-BTC_TRADE_AMOUNT = '0.001'  # Default trade amount
+AMOUNTS = []
 SIDE = 'SELL'  # Default SIDE
 FEES_ESTIMATE = 0.006  # 0.6% pessimistic estimate
 SLIPPAGE_ESTIMATE = 10
 MIN_PROFIT = 0
 CHECK_PREV_BUY = False
-
-# State file will be set after MAIN_CURRENCY is determined
 STATE_FILE = None
 
-def get_state_file():
-    """Get state file path based on main currency"""
-    return f"/home/ubuntu/workspace/crypto_trading_bot/state_{MAIN_CURRENCY}.json"
 
-def load_state():
-    state_file = get_state_file()
+
+def get_state_file(currency: str):
+    """Get state file path based on main currency"""
+    return f"/home/ubuntu/workspace/crypto_trading_bot/state_{currency}.json"
+
+def load_state(currency : str):
+    state_file = get_state_file(currency)
     if os.path.exists(state_file):
         with open(state_file, "r") as f:
             content = f.read()
@@ -55,8 +54,8 @@ def load_state():
         'total_profit': 0.0,
     }
 
-def save_state(trading_state):
-    state_file = get_state_file()
+def save_state(trading_state, currency : str):
+    state_file = get_state_file(currency)
     with open(state_file, "w") as f:
         json.dump(trading_state, f)
 
@@ -65,10 +64,9 @@ def execute_first_order(signal_data):
     """Execute SELL or BUY order"""
     
     price = signal_data.get('price')
-    ticker = signal_data.get('ticker', f'{MAIN_CURRENCY}GBP')
-    # Convert ticker to Coinbase format (BTCGBP -> BTC-GBP)
-    product_id = f"{ticker[:-3]}-{ticker[-3:]}" if 'GBP' in ticker else f"{MAIN_CURRENCY}-GBP"
-    
+    product_id = signal_data.get('ticker') # customized BTC-GBP, normally ticker is BTCGBP
+    currency = product_id[:3]
+
     global SIDE
 
     print(f"\n{'='*60}")
@@ -78,9 +76,9 @@ def execute_first_order(signal_data):
     try:
         # Place limit order on Coinbase
         # if SIDE == 'SELL':
-        #     order = client.market_order_sell(client_order_id=str(uuid.uuid4()), product_id=product_id, base_size=BTC_TRADE_AMOUNT)
+        #     order = client.market_order_sell(client_order_id=str(uuid.uuid4()), product_id=product_id, base_size=AMOUNTS[currency])
         # elif SIDE == 'BUY':
-        #     order = client.market_order_buy(client_order_id=str(uuid.uuid4()), product_id=product_id, base_size=BTC_TRADE_AMOUNT)
+        #     order = client.market_order_buy(client_order_id=str(uuid.uuid4()), product_id=product_id, base_size=AMOUNTS[currency])
         
         # Place limit order on Coinbase
         if SIDE == 'SELL':
@@ -88,14 +86,14 @@ def execute_first_order(signal_data):
                 print(f"⚠️ Current price ${price} is below minimum activation price ${MINIMUM_ACT_PRICE}. Skipping SELL order.")
                 return False
             order_response = client.limit_order_gtc_sell(client_order_id=str(uuid.uuid4()), product_id=product_id,\
-                                                base_size=BTC_TRADE_AMOUNT, limit_price=str(round(price * 0.999, 2)))
+                                                base_size=AMOUNTS[currency], limit_price=str(round(price * 0.999, 2)))
         elif SIDE == 'BUY':
 
             if MINIMUM_ACT_PRICE != 0 and price > MINIMUM_ACT_PRICE:
                 print(f"⚠️ Current price ${price} is above maximum activation price ${MINIMUM_ACT_PRICE}. Skipping BUY order.")
                 return False
             order_response = client.limit_order_gtc_buy(client_order_id=str(uuid.uuid4()), product_id=product_id,\
-                                                base_size=BTC_TRADE_AMOUNT, limit_price=str(round(price * 1.001, 2)))
+                                                base_size=AMOUNTS[currency], limit_price=str(round(price * 1.001, 2)))
         
         if order_response.success:
 
@@ -115,7 +113,7 @@ def execute_first_order(signal_data):
                     execution_price = round(float(order.average_filled_price), 2)
                     fees = round(float(order.total_fees), 2)
 
-                    trading_state = load_state()
+                    trading_state = load_state(currency)
                     
                     # Update state
                     if SIDE == 'SELL':
@@ -128,7 +126,7 @@ def execute_first_order(signal_data):
                         print(f"💸 Fees: ${fees}")
                         print(f"💵 Before Fees: ${gain_before_fees}")
                         print(f"💵 After  Fees: ${gain_after_fees}")
-                        print(f"📊 Amount: {BTC_TRADE_AMOUNT} {MAIN_CURRENCY}")
+                        print(f"📊 Amount: {AMOUNTS[currency]} {currency}")
                         print(f"📈 Waiting for BUY signal acheives pay below ${gain_after_fees} gain")
                         print(f"{'='*60}\n")
 
@@ -142,11 +140,11 @@ def execute_first_order(signal_data):
                         print(f"💸 Fees: ${fees}")
                         print(f"💵 Before Fees: ${pay_before_fees}")
                         print(f"💵 After  Fees: ${pay_after_fees}")
-                        print(f"📊 Amount: {BTC_TRADE_AMOUNT} {MAIN_CURRENCY}")
+                        print(f"📊 Amount: {AMOUNTS[currency]} {currency}")
                         print(f"📈 Waiting for SELL signal acheives above ${pay_after_fees} pay")
                         print(f"{'='*60}\n")
                     
-                    save_state(trading_state)
+                    save_state(trading_state, currency)
                     return True
                 elif order.status == "OPEN":
                     print(f"⏳ Still waiting... ({i*2}s)")
@@ -169,12 +167,12 @@ def execute_first_order(signal_data):
 def execute_buy_order(signal_data):
     """Execute BUY order only if profitable"""
     price = signal_data.get('price')
-    ticker = signal_data.get('ticker', f"{MAIN_CURRENCY}GBP")
-    product_id = f"{ticker[:-3]}-{ticker[-3:]}" if 'GBP' in ticker else f"{MAIN_CURRENCY}-GBP"
-    trading_state = load_state()
+    product_id = signal_data.get('ticker')
+    currency = product_id[:3]
+    trading_state = load_state(currency)
     last_sell_gain = trading_state['last_sell_gain']
     
-    estimate_pay_before_fees = price * float(BTC_TRADE_AMOUNT)
+    estimate_pay_before_fees = price * float(AMOUNTS[currency])
     estimate_pay_after_fees = round(estimate_pay_before_fees + (estimate_pay_before_fees * FEES_ESTIMATE), 2) 
 
     # Check if BUY is profitable
@@ -192,7 +190,7 @@ def execute_buy_order(signal_data):
     try:
         # Place BUY order on Coinbase
         order_response = client.limit_order_gtc_buy(client_order_id=str(uuid.uuid4()), product_id=product_id,\
-                                            base_size=BTC_TRADE_AMOUNT, limit_price=str(round(price * 1.001, 2)))
+                                            base_size=AMOUNTS[currency], limit_price=str(round(price * 1.001, 2)))
 
         if order_response.success:
 
@@ -222,13 +220,13 @@ def execute_buy_order(signal_data):
                     print(f"💸 Fees: ${fees}")
                     print(f"💵 Before Fees: ${pay_before_fees}")
                     print(f"💵 After  Fees: ${pay_after_fees}")
-                    print(f"📊 Amount: {BTC_TRADE_AMOUNT} {MAIN_CURRENCY}")
+                    print(f"📊 Amount: {AMOUNTS[currency]} {currency}")
                     print(f"💵 Trade Profit: ${profit:.2f}")
                     print(f"💰 Total Profit: ${trading_state['total_profit']:.2f}")
                     print(f"📈 Waiting for SELL signal above ${pay_after_fees} pay")
                     print(f"{'='*60}\n")
 
-                    save_state(trading_state)
+                    save_state(trading_state, currency)
                     return True
                 elif order.status == "OPEN":
                     print(f"⏳ Still waiting... ({i*2}s)")
@@ -255,12 +253,13 @@ def execute_sell_order(signal_data):
     if MINIMUM_ACT_PRICE != 0 and price < MINIMUM_ACT_PRICE:
         print(f"⚠️ Current price ${price} is below minimum activation price ${MINIMUM_ACT_PRICE}. Skipping SELL order.")
         return False
-    ticker = signal_data.get('ticker', f"{MAIN_CURRENCY}GBP")
-    product_id = f"{ticker[:-3]}-{ticker[-3:]}" if 'GBP' in ticker else f"{MAIN_CURRENCY}-GBP"
-    trading_state = load_state()
+
+    product_id = signal_data.get('ticker')
+    currency = product_id[:3]
+    trading_state = load_state(currency)
     last_buy_pay = trading_state['last_buy_pay']
     
-    estimate_gain_before_fess = float(price) * float(BTC_TRADE_AMOUNT)
+    estimate_gain_before_fess = float(price) * float(AMOUNTS[currency])
     estimate_gain_after_fees = round(estimate_gain_before_fess - (estimate_gain_before_fess * FEES_ESTIMATE), 2)
 
     # Check if SELL is profitable
@@ -278,7 +277,7 @@ def execute_sell_order(signal_data):
     try:
         # Place SELL order on Coinbase
         order_response = client.limit_order_gtc_sell(client_order_id=str(uuid.uuid4()), product_id=product_id,\
-                                            base_size=BTC_TRADE_AMOUNT, limit_price=str(round(price * 0.999, 2)))
+                                            base_size=AMOUNTS[currency], limit_price=str(round(price * 0.999, 2)))
 
         if order_response.success:
 
@@ -310,13 +309,13 @@ def execute_sell_order(signal_data):
                     print(f"💸 Fees: ${fees}")
                     print(f"💵 Before Fees: ${gain_before_fees}")
                     print(f"💵 After  Fees: ${gain_after_fees}")
-                    print(f"📊 Amount: {BTC_TRADE_AMOUNT} {MAIN_CURRENCY}")
+                    print(f"📊 Amount: {AMOUNTS[currency]} {currency}")
                     print(f"💵 Trade Profit: ${profit:.2f}")
                     print(f"💰 Total Profit: ${trading_state['total_profit']:.2f}")
                     print(f"📈 Waiting for BUY signal below ${gain_after_fees} gain")
                     print(f"{'='*60}\n")
 
-                    save_state(trading_state)
+                    save_state(trading_state, currency)
                     return True
                 elif order.status == "OPEN":
                     print(f"⏳ Still waiting... ({i*2}s)")
@@ -359,11 +358,12 @@ def webhook():
         
         action = data.get('action', '')
         price = data.get('price')
+        currency = data.get('ticker', '')[:3]  # Extract currency from ticker (e.g. BTC from BTCGBP)
 
         # Log incoming signal
         print(f"\n📨 Signal received: {action} at ${price}")
         
-        trading_state = load_state()
+        trading_state = load_state(currency)
 
         # Trading Strategy Logic
         if trading_state['position'] is None:
@@ -397,25 +397,30 @@ def webhook():
 if __name__ == '__main__':
     PORT = int(os.environ.get('PORT'))
     
-    if len(sys.argv) > 1:
-        MAIN_CURRENCY = str(sys.argv[1]).upper()
+    # Load amounts configuration
+    amounts_file = "/home/ubuntu/workspace/crypto_trading_bot/amounts.json"
+    if os.path.exists(amounts_file):
+        with open(amounts_file, "r") as f:
+            AMOUNTS = json.load(f)
+            print(f"✅ Loaded amounts from {amounts_file}")
+    else:
+        print(f"⚠️ amounts.json not found at {amounts_file}")
+        return 
+    
+    if len(sys.argv) > 1 and sys.argv[1] in ['BUY', 'SELL']:
+        SIDE = sys.argv[1]
     if len(sys.argv) > 2:
-        BTC_TRADE_AMOUNT = str(sys.argv[2])
-    if len(sys.argv) > 3 and sys.argv[3] in ['BUY', 'SELL']:
-        SIDE = sys.argv[3]
-    if len(sys.argv) > 4:
-        MINIMUM_ACT_PRICE = int(sys.argv[4])
+        MINIMUM_ACT_PRICE = int(sys.argv[2])
 
     print(f"\n{'='*60}")
     print(f"🤖 COINBASE TRADING BOT STARTING")
     print(f"{'='*60}")
     print(f"🔒 Server port: {PORT}")
     print(f"📡 Webhook: http://0.0.0.0:{PORT}/webhook")
-    print(f"💱 Trading pair: {MAIN_CURRENCY}-GBP")
-    print(f"📊 Amount per trade: {BTC_TRADE_AMOUNT} {MAIN_CURRENCY}")
+    print(f"💱 Trading pair: XXX-GBP")
+    print(f"📋 Amounts : {AMOUNTS}")
     print(f"Act Minimum: {MINIMUM_ACT_PRICE}")
     print(f"⏳ Strategy: Waiting for first ${SIDE} signal...")
-    print(f"📁 State file: {get_state_file()}")
     print(f"{'='*60}\n")
     
     app.run(host='0.0.0.0', port=PORT, debug=False)
